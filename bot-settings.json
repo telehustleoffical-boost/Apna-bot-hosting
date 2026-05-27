@@ -1,0 +1,4 @@
+{
+  "apiKey": "bad088b9-daf",
+  "globalBotCode": "// Example Telegraf bot code\nbot.start((ctx) => {\n  ctx.reply('Hello! I am an active bot created via Apna Bot Maker!');\n});\n\nbot.on('text', (ctx) => {\n  ctx.reply(`Echo: ${ctx.message.text}`);\n});"
+}
