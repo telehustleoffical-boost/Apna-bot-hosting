@@ -1,0 +1,349 @@
+import React, { useState, useEffect } from 'react';
+import { Bot, Play, Square, ShieldAlert, Cpu, Code2, Link as LinkIcon, Save, KeyRound } from 'lucide-react';
+import axios from 'axios';
+import Editor from '@monaco-editor/react';
+
+interface BotInfo {
+  token: string;
+  maskedToken: string;
+  username: string;
+  name: string;
+  startedAt: string;
+}
+
+export default function App() {
+  const [bots, setBots] = useState<BotInfo[]>([]);
+  const [tokenInput, setTokenInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [codeInput, setCodeInput] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const [customAppUrl, setCustomAppUrl] = useState('');
+
+  // Fetch settings & code
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCustomAppUrl(window.location.origin);
+    }
+    const fetchSettings = async () => {
+      try {
+        const res = await axios.get('/api/bots/settings');
+        if (res.data.success) {
+          setCodeInput(res.data.settings.globalBotCode);
+          setApiKey(res.data.settings.apiKey);
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings', err);
+      }
+    };
+    fetchSettings();
+  }, []);
+
+  // Fetch active bots
+  const fetchBots = async () => {
+    try {
+      const res = await axios.get('/api/bots');
+      if (res.data.success) {
+        setBots(res.data.bots);
+      }
+    } catch (err) {
+      console.error('Failed to fetch bots', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchBots();
+    const interval = setInterval(fetchBots, 5000); // refresh every 5s
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await axios.post('/api/bots/settings', {
+        apiKey,
+        globalBotCode: codeInput
+      });
+      alert('Settings & Code saved successfully!');
+    } catch (err) {
+      alert('Failed to save settings.');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleStartBot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenInput.trim()) return;
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await axios.post('/api/bots/start', { 
+        token: tokenInput.trim(),
+        name: nameInput.trim() || undefined,
+        code: codeInput,
+      });
+      
+      if (res.data.success) {
+        setSuccess(`Bot @${res.data.bot.username} launched successfully!`);
+        setTokenInput('');
+        setNameInput('');
+        fetchBots();
+        
+        // Also save the code implicitly if it succeeds
+        axios.post('/api/bots/settings', { apiKey, globalBotCode: codeInput });
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to start bot.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStopBot = async (tokenToStop: string) => {
+    if (!window.confirm("Are you sure you want to stop this bot?")) return;
+    
+    try {
+      const res = await axios.post('/api/bots/stop', { token: tokenToStop });
+      if (res.data.success) {
+        fetchBots();
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to stop the bot.');
+    }
+  };
+
+  const apiEndpointPreview = `${customAppUrl}/api/bots/auto-deploy?key=${apiKey}&token=BOT_TOKEN`;
+
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col">
+      {/* Header */}
+      <header className="bg-indigo-600 text-white py-6 shadow-md shrink-0">
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Cpu className="w-8 h-8 text-indigo-200" />
+            <h1 className="text-2xl font-bold tracking-tight">Apna Bot Maker</h1>
+          </div>
+          <div className="flex items-center gap-2 text-indigo-200 text-sm font-medium bg-indigo-700/50 px-3 py-1.5 rounded-full">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse animate-duration-1000"></span>
+            Server Online
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl w-full mx-auto px-6 py-10 grid lg:grid-cols-[1.5fr_1fr] gap-8 flex-1">
+        
+        {/* Left Column: Editor & Form */}
+        <section className="flex flex-col space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col flex-1">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-indigo-600" />
+                <h2 className="text-xl font-semibold">Bot Logic Editor</h2>
+              </div>
+              <button 
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+                className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-100 transition"
+              >
+                <Save className="w-4 h-4" />
+                {savingSettings ? 'Saving...' : 'Save Default Logic'}
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Write custom bot logic using JavaScript (Telegraf). This code will be used for auto-deployed bots.
+            </p>
+            <div className="flex-1 min-h-[300px] border border-gray-200 rounded-lg overflow-hidden bg-[#1e1e1e]">
+               <Editor
+                 height="100%"
+                 defaultLanguage="javascript"
+                 theme="vs-dark"
+                 value={codeInput}
+                 onChange={(value) => setCodeInput(value || '')}
+                 options={{
+                   minimap: { enabled: false },
+                   fontSize: 14,
+                   wordWrap: 'on',
+                   padding: { top: 16 }
+                 }}
+               />
+            </div>
+          </div>
+
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Bot className="w-5 h-5 text-indigo-600" />
+              <h2 className="text-xl font-semibold">Deploy Bot Instance</h2>
+            </div>
+
+            <form onSubmit={handleStartBot} className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bot Name (Optional)</label>
+                  <input 
+                    type="text" 
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    placeholder="e.g. My Helper Bot"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bot Token <span className="text-red-500">*</span></label>
+                  <input 
+                    type="password" 
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-sm"
+                    placeholder="1234567890:ABCdef..."
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start gap-2 border border-red-100">
+                  <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {success && (
+                <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm border border-green-100">
+                  {success}
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={loading || !tokenInput.trim()}
+                className="w-full bg-indigo-600 text-white font-medium py-3 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 disabled:bg-indigo-400 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                ) : (
+                  <>
+                    <Play className="w-5 h-5 fill-current" />
+                    Deploy Bot to Server
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <LinkIcon className="w-5 h-5 text-indigo-700" />
+              <h2 className="text-xl font-semibold text-indigo-900">Auto-Deploy API URL</h2>
+            </div>
+            <p className="text-sm text-indigo-800/80 mb-4 leading-relaxed">
+              Use this endpoint in your external services or webhooks to auto-deploy a bot with the logic defined in your editor above.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-indigo-900 mb-1">Your API Key (Required for access)</label>
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <input 
+                    type="password" 
+                    className="w-full border border-indigo-200 bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Set an API key to protect your endpoint"
+                  />
+                  <button 
+                    onClick={handleSaveSettings}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition leading-none h-[38px] shrink-0"
+                  >
+                    Update
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-indigo-900 mb-1">Your App Host URL</label>
+                <input 
+                  type="text" 
+                  className="w-full border border-indigo-200 bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono mb-4"
+                  value={customAppUrl}
+                  onChange={(e) => setCustomAppUrl(e.target.value)}
+                  placeholder="https://apnabothosting.netlify.app"
+                />
+
+                <label className="block text-sm font-semibold text-indigo-900 mb-1">Public Endpoint Link</label>
+                <div className="group relative">
+                  <div className="w-full bg-indigo-900 text-indigo-50 font-mono text-xs p-3 rounded-lg break-all select-all flex border border-indigo-800">
+                    {apiEndpointPreview}
+                  </div>
+                </div>
+                <p className="text-xs text-indigo-700 mt-2">Just replace <code className="font-mono bg-indigo-100 px-1 py-0.5 rounded">BOT_TOKEN</code> with a valid Telegram bot token inside a GET or POST request.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Right Column: Status */}
+        <section className="flex flex-col h-full">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col h-full max-h-[800px]">
+            <div className="flex items-center justify-between mb-6 shrink-0">
+              <h2 className="text-xl font-semibold">Live Bot Deployments</h2>
+              <span className="bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-200">
+                {bots.length} Active
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0 pr-2">
+              {bots.length === 0 ? (
+                <div className="h-full flex flex-col justify-center items-center border-2 border-dashed border-gray-200 rounded-xl p-8 text-center min-h-[300px]">
+                  <Bot className="w-10 h-10 text-gray-300 mb-3" />
+                  <p className="text-gray-500 font-medium">No active bots found.</p>
+                  <p className="text-sm text-gray-400 mt-1">Deploy a new bot from the editor to see it here.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {bots.map((botInfo, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group hover:border-gray-300 transition shadow-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-white rounded-full flex justify-center items-center shadow-sm border border-gray-200 relative shrink-0">
+                          <Bot className="w-6 h-6 text-indigo-600" />
+                          <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+                        </div>
+                        <div className="overflow-hidden">
+                          <h3 className="font-semibold text-gray-900 group-hover:text-indigo-600 transition truncate">
+                            {botInfo.name || 'Unnamed Bot'}
+                          </h3>
+                          <p className="text-sm text-gray-500 font-medium font-mono truncate">@{botInfo.username}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">Active since {new Date(botInfo.startedAt).toLocaleTimeString()}</p>
+                        </div>
+                      </div>
+                      
+                      <button 
+                        onClick={() => handleStopBot(botInfo.token)}
+                        className="p-2.5 text-red-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition shrink-0"
+                        title="Stop execution"
+                      >
+                        <Square className="w-5 h-5 fill-current" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  );
+}
